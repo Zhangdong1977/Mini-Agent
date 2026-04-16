@@ -27,6 +27,7 @@ class AnthropicClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/anthropic",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize Anthropic client.
 
@@ -35,6 +36,7 @@ class AnthropicClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax Anthropic endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            timeout: Optional timeout in seconds for API calls
         """
         super().__init__(api_key, api_base, model, retry_config)
 
@@ -43,6 +45,7 @@ class AnthropicClient(LLMClientBase):
             base_url=api_base,
             api_key=api_key,
             default_headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
         )
 
     async def _make_api_request(
@@ -50,6 +53,7 @@ class AnthropicClient(LLMClientBase):
         system_message: str | None,
         api_messages: list[dict[str, Any]],
         tools: list[Any] | None = None,
+        max_tokens: int | None = None,
     ) -> anthropic.types.Message:
         """Execute API request (core method that can be retried).
 
@@ -57,6 +61,7 @@ class AnthropicClient(LLMClientBase):
             system_message: Optional system message
             api_messages: List of messages in Anthropic format
             tools: Optional list of tools
+            max_tokens: Optional maximum tokens for response output
 
         Returns:
             Anthropic Message response
@@ -66,7 +71,7 @@ class AnthropicClient(LLMClientBase):
         """
         params = {
             "model": self.model,
-            "max_tokens": 16384,
+            "max_tokens": max_tokens if max_tokens is not None else 16384,
             "messages": api_messages,
         }
 
@@ -258,12 +263,14 @@ class AnthropicClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """Generate response from Anthropic LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            max_tokens: Optional maximum tokens for response output
 
         Returns:
             LLMResponse containing the generated content
@@ -280,6 +287,7 @@ class AnthropicClient(LLMClientBase):
                 request_params["system_message"],
                 request_params["api_messages"],
                 request_params["tools"],
+                max_tokens,
             )
         else:
             # Don't use retry
@@ -287,6 +295,7 @@ class AnthropicClient(LLMClientBase):
                 request_params["system_message"],
                 request_params["api_messages"],
                 request_params["tools"],
+                max_tokens,
             )
 
         # Parse and return response

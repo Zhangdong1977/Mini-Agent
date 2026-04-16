@@ -40,6 +40,7 @@ class LLMClient:
         api_base: str = "https://api.minimaxi.com",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize LLM client with specified provider.
 
@@ -51,11 +52,13 @@ class LLMClient:
                      For third-party APIs (e.g., https://api.siliconflow.cn/v1), used as-is.
             model: Model name to use
             retry_config: Optional retry configuration
+            timeout: Optional timeout in seconds for LLM API calls
         """
         self.provider = provider
         self.api_key = api_key
         self.model = model
         self.retry_config = retry_config or RetryConfig()
+        self.timeout = timeout
 
         # Normalize api_base (remove trailing slash)
         api_base = api_base.rstrip("/")
@@ -87,6 +90,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                timeout=timeout,
             )
         elif provider == LLMProvider.OPENAI:
             self._client = OpenAIClient(
@@ -94,6 +98,7 @@ class LLMClient:
                 api_base=full_api_base,
                 model=model,
                 retry_config=retry_config,
+                timeout=timeout,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
@@ -114,14 +119,16 @@ class LLMClient:
         self,
         messages: list[Message],
         tools: list | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            max_tokens: Optional maximum tokens for response output
 
         Returns:
             LLMResponse containing the generated content
         """
-        return await self._client.generate(messages, tools)
+        return await self._client.generate(messages, tools, max_tokens=max_tokens)

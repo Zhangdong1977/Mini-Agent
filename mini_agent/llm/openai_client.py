@@ -28,6 +28,7 @@ class OpenAIClient(LLMClientBase):
         api_base: str = "https://api.minimaxi.com/v1",
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
+        timeout: float | None = None,
     ):
         """Initialize OpenAI client.
 
@@ -36,6 +37,7 @@ class OpenAIClient(LLMClientBase):
             api_base: Base URL for the API (default: MiniMax OpenAI endpoint)
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
+            timeout: Optional timeout in seconds for API calls
         """
         super().__init__(api_key, api_base, model, retry_config)
 
@@ -43,18 +45,21 @@ class OpenAIClient(LLMClientBase):
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
+            timeout=timeout,
         )
 
     async def _make_api_request(
         self,
         api_messages: list[dict[str, Any]],
         tools: list[Any] | None = None,
+        max_tokens: int | None = None,
     ) -> Any:
         """Execute API request (core method that can be retried).
 
         Args:
             api_messages: List of messages in OpenAI format
             tools: Optional list of tools
+            max_tokens: Optional maximum tokens for response output
 
         Returns:
             OpenAI ChatCompletion response (full response including usage)
@@ -71,6 +76,9 @@ class OpenAIClient(LLMClientBase):
 
         if tools:
             params["tools"] = self._convert_tools(tools)
+
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
 
         # Use OpenAI SDK's chat.completions.create
         response = await self.client.chat.completions.create(**params)
@@ -262,12 +270,14 @@ class OpenAIClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """Generate response from OpenAI LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            max_tokens: Optional maximum tokens for response output (prevents truncation)
 
         Returns:
             LLMResponse containing the generated content
@@ -283,12 +293,14 @@ class OpenAIClient(LLMClientBase):
             response = await api_call(
                 request_params["api_messages"],
                 request_params["tools"],
+                max_tokens,
             )
         else:
             # Don't use retry
             response = await self._make_api_request(
                 request_params["api_messages"],
                 request_params["tools"],
+                max_tokens,
             )
 
         # Parse and return response

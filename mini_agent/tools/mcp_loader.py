@@ -233,8 +233,33 @@ class MCPServerConnection:
 
     async def _connect_stdio(self):
         """Connect via STDIO transport."""
-        server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)
-        return await self.exit_stack.enter_async_context(stdio_client(server_params))
+        import sys as _sys
+        import tempfile
+
+        # Fix for Celery's LoggingProxy which doesn't have fileno()
+        # When running inside Celery workers, sys.stderr is replaced with a
+        # LoggingProxy object that breaks asyncio.subprocess.Popen
+        _real_stderr = _sys.stderr
+        _needs_fix = False
+        try:
+            _sys.stderr.fileno()
+        except AttributeError:
+            _needs_fix = True
+
+        if _needs_fix:
+            # Create a temp file to act as stderr - this has a valid fileno()
+            _temp_stderr = tempfile.NamedTemporaryFile(mode='w+', delete=False)
+            _temp_stderr.close()
+            _real_fd_stderr = open(_temp_stderr.name, 'w')
+            _sys.stderr = _real_fd_stderr
+
+        try:
+            server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)
+            return await self.exit_stack.enter_async_context(stdio_client(server_params))
+        finally:
+            if _needs_fix:
+                _sys.stderr = _real_stderr
+                _real_fd_stderr.close()
 
     async def _connect_sse(self):
         """Connect via SSE transport with timeout parameters."""

@@ -42,12 +42,14 @@ class LLMClientBase(ABC):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            max_tokens: Optional maximum tokens for response output
 
         Returns:
             LLMResponse containing the generated content, thinking, and tool calls
