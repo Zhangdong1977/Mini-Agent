@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import Optional
+from typing import Callable, Optional
 
 import tiktoken
 
@@ -53,6 +53,7 @@ class Agent:
         max_steps: int = 50,
         workspace_dir: str = "./workspace",
         token_limit: int = 80000,  # Summary triggered when tokens exceed this value
+        event_callback: Optional[Callable[[str, dict], None]] = None,  # New: optional event callback
     ):
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -61,6 +62,8 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         # Cancellation event for interrupting agent execution (set externally, e.g., by Esc key)
         self.cancel_event: Optional[asyncio.Event] = None
+        # Event callback for emitting events (SSE, logging, etc.)
+        self.event_callback = event_callback
 
         # Ensure workspace exists
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -86,6 +89,20 @@ class Agent:
     def add_user_message(self, content: str):
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
+
+    def _emit_event(self, event_type: str, data: dict) -> None:
+        """Emit an event via callback if available.
+
+        Args:
+            event_type: Type of event (e.g., "step_start", "llm_output", "tool_call_start")
+            data: Event data dictionary
+        """
+        if self.event_callback:
+            try:
+                self.event_callback(event_type, data)
+            except Exception as e:
+                # Callback errors should not interrupt agent execution
+                print(f"{Colors.DIM}Warning: event_callback error: {e}{Colors.RESET}")
 
     def _check_cancelled(self) -> bool:
         """Check if agent execution has been cancelled.
@@ -341,11 +358,20 @@ Requirements:
         run_start_time = perf_counter()
 
         while step < self.max_steps:
+            step += 1
+
+            # Event: step_start
+            self._emit_event("step_start", {
+                "step": step,
+                "max_steps": self.max_steps,
+            })
+
             # Check for cancellation at start of each step
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
+                self._emit_event("cancelled", {"step": step})
                 return cancel_msg
 
             step_start_time = perf_counter()
@@ -354,7 +380,7 @@ Requirements:
 
             # Step header with proper width calculation
             BOX_WIDTH = 58
-            step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 Step {step + 1}/{self.max_steps}{Colors.RESET}"
+            step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 Step {step}/{self.max_steps}{Colors.RESET}"
             step_display_width = calculate_display_width(step_text)
             padding = max(0, BOX_WIDTH - 1 - step_display_width)  # -1 for leading space
 
@@ -394,6 +420,17 @@ Requirements:
                 finish_reason=response.finish_reason,
             )
 
+            # Event: llm_output
+            self._emit_event("llm_output", {
+                "step": step,
+                "thinking": response.thinking,
+                "content": response.content,
+                "tool_calls": [
+                    {"name": tc.function.name, "arguments": tc.function.arguments}
+                    for tc in response.tool_calls or []
+                ],
+            })
+
             # Add assistant message
             assistant_msg = Message(
                 role="assistant",
@@ -417,7 +454,9 @@ Requirements:
             if not response.tool_calls:
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
-                print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+                print(f"\n{Colors.DIM}⏱️  Step {step} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+                # Event: completed
+                self._emit_event("completed", {"step": step, "reason": "no_tool_calls"})
                 return response.content
 
             # Check for cancellation before executing tools
@@ -432,6 +471,13 @@ Requirements:
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
+
+                # Event: tool_call_start
+                self._emit_event("tool_call_start", {
+                    "step": step,
+                    "tool": function_name,
+                    "arguments": arguments,
+                })
 
                 # Tool call header
                 print(f"\n{Colors.BRIGHT_YELLOW}🔧 Tool Call:{Colors.RESET} {Colors.BOLD}{Colors.CYAN}{function_name}{Colors.RESET}")
@@ -491,6 +537,15 @@ Requirements:
                 else:
                     print(f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}")
 
+                # Event: tool_call_end
+                self._emit_event("tool_call_end", {
+                    "step": step,
+                    "tool": function_name,
+                    "success": result.success,
+                    "result": result.content if result.success else None,
+                    "error": result.error if not result.success else None,
+                })
+
                 # Add tool result message
                 tool_msg = Message(
                     role="tool",
@@ -509,13 +564,15 @@ Requirements:
 
             step_elapsed = perf_counter() - step_start_time
             total_elapsed = perf_counter() - run_start_time
-            print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+            print(f"\n{Colors.DIM}⏱️  Step {step} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
 
-            step += 1
+            # Event: step_complete
+            self._emit_event("step_complete", {"step": step})
 
         # Max steps reached
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
+        self._emit_event("max_steps_reached", {"step": step, "max_steps": self.max_steps})
         return error_msg
 
     def get_history(self) -> list[Message]:
