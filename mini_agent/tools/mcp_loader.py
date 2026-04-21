@@ -235,6 +235,8 @@ class MCPServerConnection:
         """Connect via STDIO transport."""
         import sys as _sys
         import tempfile
+        import re
+        import os
 
         # Fix for Celery's LoggingProxy which doesn't have fileno()
         # When running inside Celery workers, sys.stderr is replaced with a
@@ -254,7 +256,21 @@ class MCPServerConnection:
             _sys.stderr = _real_fd_stderr
 
         try:
-            server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)
+            # Expand ${VAR} style environment variables in env values
+            expanded_env = None
+            if self.env:
+                expanded_env = {}
+                for key, value in self.env.items():
+                    if isinstance(value, str):
+                        # Expand ${VAR} patterns
+                        def expand_var(m):
+                            var_name = m.group(1)
+                            return os.environ.get(var_name, m.group(0))
+                        expanded_env[key] = re.sub(r'\$\{([^}]+)\}', expand_var, value)
+                    else:
+                        expanded_env[key] = value
+
+            server_params = StdioServerParameters(command=self.command, args=self.args, env=expanded_env if expanded_env else None)
             return await self.exit_stack.enter_async_context(stdio_client(server_params))
         finally:
             if _needs_fix:
