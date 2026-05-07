@@ -13,6 +13,55 @@ from .base import LLMClientBase
 logger = logging.getLogger(__name__)
 
 
+def _repair_truncated_json(json_str: str) -> Any | None:
+    """Attempt to repair common JSON truncation errors from LLM output.
+
+    Returns parsed object on success, None if unrepairable.
+    """
+    s = json_str.strip()
+
+    if not s:
+        return None
+
+    # Strategy 1: Unterminated string — append closing quote
+    if not s.endswith('"'):
+        try:
+            return json.loads(s + '"')
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 2: Balance unclosed braces and brackets
+    open_braces = s.count('{') - s.count('}')
+    open_brackets = s.count('[') - s.count(']')
+
+    if open_braces > 0 or open_brackets > 0:
+        # Check if we're inside an unterminated string value
+        stripped = s.rstrip()
+        if stripped and stripped[-1] not in ('}', ']', '"', ':', ',', ' ', '\n', '\t'):
+            # Value without closing quote — try adding quote + closing brackets
+            try:
+                repaired = s + '"' + '}' * open_braces + ']' * open_brackets
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+
+        # Strategy 3: Just close brackets/braces
+        try:
+            repaired = s + '}' * open_braces + ']' * open_brackets
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: Trailing comma — trim and close
+    if s.endswith(','):
+        try:
+            return json.loads(s.rstrip(',') + '}' * open_braces + ']' * open_brackets)
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 class OpenAIClient(LLMClientBase):
     """LLM client using OpenAI's protocol.
 
@@ -235,8 +284,28 @@ class OpenAIClient(LLMClientBase):
         tool_calls = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                # Parse arguments from JSON string
-                arguments = json.loads(tool_call.function.arguments)
+                # Parse arguments from JSON string with repair fallback
+                raw_args = tool_call.function.arguments
+                try:
+                    arguments = json.loads(raw_args)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"JSON decode error for tool_call {tool_call.function.name}: {e}. "
+                        f"Attempting repair..."
+                    )
+                    repaired = _repair_truncated_json(raw_args)
+                    if repaired is not None:
+                        arguments = repaired
+                        logger.info(
+                            f"Successfully repaired JSON for tool_call {tool_call.function.name}"
+                        )
+                    else:
+                        logger.error(
+                            f"Failed to repair JSON for tool_call {tool_call.function.name}, "
+                            f"skipping this tool call. Raw args (first 200 chars): "
+                            f"{raw_args[:200]}"
+                        )
+                        continue
 
                 tool_calls.append(
                     ToolCall(
