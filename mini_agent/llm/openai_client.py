@@ -78,6 +78,7 @@ class OpenAIClient(LLMClientBase):
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
         timeout: float | None = None,
+        reasoning_split: bool = True,
     ):
         """Initialize OpenAI client.
 
@@ -87,8 +88,10 @@ class OpenAIClient(LLMClientBase):
             model: Model name to use (default: MiniMax-M2.5)
             retry_config: Optional retry configuration
             timeout: Optional timeout in seconds for API calls
+            reasoning_split: Whether to enable reasoning_split for MiniMax (default: True)
         """
         super().__init__(api_key, api_base, model, retry_config)
+        self.reasoning_split = reasoning_split
 
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -119,9 +122,11 @@ class OpenAIClient(LLMClientBase):
         params = {
             "model": self.model,
             "messages": api_messages,
-            # Enable reasoning_split to separate thinking content
-            "extra_body": {"reasoning_split": True},
         }
+
+        # MiniMax-specific: enable reasoning_split to separate thinking content
+        if self.reasoning_split:
+            params["extra_body"] = {"reasoning_split": True}
 
         if tools:
             params["tools"] = self._convert_tools(tools)

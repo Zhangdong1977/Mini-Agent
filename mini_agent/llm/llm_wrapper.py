@@ -41,6 +41,7 @@ class LLMClient:
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
         timeout: float | None = None,
+        reasoning_split: bool = True,
     ):
         """Initialize LLM client with specified provider.
 
@@ -53,6 +54,7 @@ class LLMClient:
             model: Model name to use
             retry_config: Optional retry configuration
             timeout: Optional timeout in seconds for LLM API calls
+            reasoning_split: Whether to enable reasoning_split for MiniMax (default: True)
         """
         self.provider = provider
         self.api_key = api_key
@@ -99,6 +101,7 @@ class LLMClient:
                 model=model,
                 retry_config=retry_config,
                 timeout=timeout,
+                reasoning_split=reasoning_split,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
