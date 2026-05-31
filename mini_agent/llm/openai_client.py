@@ -79,6 +79,7 @@ class OpenAIClient(LLMClientBase):
         retry_config: RetryConfig | None = None,
         timeout: float | None = None,
         reasoning_split: bool = True,
+        reasoning_mode: str | None = None,
     ):
         """Initialize OpenAI client.
 
@@ -89,9 +90,12 @@ class OpenAIClient(LLMClientBase):
             retry_config: Optional retry configuration
             timeout: Optional timeout in seconds for API calls
             reasoning_split: Whether to enable reasoning_split for MiniMax (default: True)
+            reasoning_mode: Reasoning format mode: "deepseek" for DeepSeek reasoning_content,
+                          None for MiniMax reasoning_details (default: None)
         """
         super().__init__(api_key, api_base, model, retry_config)
         self.reasoning_split = reasoning_split
+        self.reasoning_mode = reasoning_mode
 
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -124,8 +128,12 @@ class OpenAIClient(LLMClientBase):
             "messages": api_messages,
         }
 
-        # MiniMax-specific: enable reasoning_split to separate thinking content
-        if self.reasoning_split:
+        # Provider-specific reasoning configuration
+        if self.reasoning_mode == "deepseek":
+            # DeepSeek: enable thinking mode
+            params["extra_body"] = {"thinking": {"type": "enabled"}}
+        elif self.reasoning_split:
+            # MiniMax: enable reasoning_split to separate thinking content
             params["extra_body"] = {"reasoning_split": True}
 
         if tools:
@@ -219,13 +227,16 @@ class OpenAIClient(LLMClientBase):
                         )
                     assistant_msg["tool_calls"] = tool_calls_list
 
-                # IMPORTANT: Add reasoning_details if thinking is present
+                # IMPORTANT: Add reasoning content if thinking is present
                 # This is CRITICAL for Interleaved Thinking to work properly!
-                # The complete response_message (including reasoning_details) must be
+                # The complete response_message (including reasoning content) must be
                 # preserved in Message History and passed back to the model in the next turn.
                 # This ensures the model's chain of thought is not interrupted.
                 if msg.thinking:
-                    assistant_msg["reasoning_details"] = [{"text": msg.thinking}]
+                    if self.reasoning_mode == "deepseek":
+                        assistant_msg["reasoning_content"] = msg.thinking
+                    else:
+                        assistant_msg["reasoning_details"] = [{"text": msg.thinking}]
 
                 api_messages.append(assistant_msg)
 
@@ -277,10 +288,14 @@ class OpenAIClient(LLMClientBase):
         # Extract text content
         text_content = message.content or ""
 
-        # Extract thinking content from reasoning_details
+        # Extract thinking content (provider-specific format)
         thinking_content = ""
-        if hasattr(message, "reasoning_details") and message.reasoning_details:
-            # reasoning_details is a list of reasoning blocks
+        if self.reasoning_mode == "deepseek":
+            # DeepSeek: reasoning_content is a plain string
+            if hasattr(message, "reasoning_content") and message.reasoning_content:
+                thinking_content = message.reasoning_content
+        elif hasattr(message, "reasoning_details") and message.reasoning_details:
+            # MiniMax: reasoning_details is a list of reasoning blocks
             for detail in message.reasoning_details:
                 if hasattr(detail, "text"):
                     thinking_content += detail.text

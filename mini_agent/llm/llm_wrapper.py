@@ -42,6 +42,7 @@ class LLMClient:
         retry_config: RetryConfig | None = None,
         timeout: float | None = None,
         reasoning_split: bool = True,
+        reasoning_mode: str | None = None,
     ):
         """Initialize LLM client with specified provider.
 
@@ -55,6 +56,7 @@ class LLMClient:
             retry_config: Optional retry configuration
             timeout: Optional timeout in seconds for LLM API calls
             reasoning_split: Whether to enable reasoning_split for MiniMax (default: True)
+            reasoning_mode: Reasoning format mode: "deepseek" for DeepSeek, None for others
         """
         self.provider = provider
         self.api_key = api_key
@@ -102,6 +104,7 @@ class LLMClient:
                 retry_config=retry_config,
                 timeout=timeout,
                 reasoning_split=reasoning_split,
+                reasoning_mode=reasoning_mode,
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
