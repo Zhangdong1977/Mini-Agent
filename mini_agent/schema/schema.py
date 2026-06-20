@@ -43,6 +43,10 @@ class TokenUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    # DeepSeek 上下文缓存拆分（OpenAI 兼容协议下 usage 里的 extra 字段）。
+    # 非 deepseek provider 不返回这两个字段，默认 0。
+    prompt_cache_hit_tokens: int = 0   # 缓存命中输入
+    prompt_cache_miss_tokens: int = 0  # 缓存未命中输入
 
 
 class LLMResponse(BaseModel):

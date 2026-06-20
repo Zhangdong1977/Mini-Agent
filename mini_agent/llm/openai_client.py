@@ -341,10 +341,15 @@ class OpenAIClient(LLMClientBase):
         # Extract token usage from response
         usage = None
         if hasattr(response, "usage") and response.usage:
+            # DeepSeek 在 usage 里额外返回 prompt_cache_hit_tokens /
+            # prompt_cache_miss_tokens（OpenAI SDK CompletionUsage 默认保留 extra 字段）。
+            # 非 deepseek provider 无此字段，getattr 兜底为 0。
             usage = TokenUsage(
                 prompt_tokens=response.usage.prompt_tokens or 0,
                 completion_tokens=response.usage.completion_tokens or 0,
                 total_tokens=response.usage.total_tokens or 0,
+                prompt_cache_hit_tokens=getattr(response.usage, "prompt_cache_hit_tokens", 0) or 0,
+                prompt_cache_miss_tokens=getattr(response.usage, "prompt_cache_miss_tokens", 0) or 0,
             )
 
         return LLMResponse(
