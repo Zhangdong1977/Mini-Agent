@@ -341,15 +341,29 @@ class OpenAIClient(LLMClientBase):
         # Extract token usage from response
         usage = None
         if hasattr(response, "usage") and response.usage:
-            # DeepSeek 在 usage 里额外返回 prompt_cache_hit_tokens /
+            # DeepSeek 在 usage 顶层额外返回 prompt_cache_hit_tokens /
             # prompt_cache_miss_tokens（OpenAI SDK CompletionUsage 默认保留 extra 字段）。
-            # 非 deepseek provider 无此字段，getattr 兜底为 0。
+            # 腾讯 TokenHub 等平台不返回 DeepSeek 风格字段，而是 OpenAI 风格的
+            # prompt_tokens_details.cached_tokens（已含于 prompt_tokens）——只认
+            # DeepSeek 字段会恒读 0，下游计费把全部输入按缓存未命中价记账。
+            prompt = response.usage.prompt_tokens or 0
+            hit = getattr(response.usage, "prompt_cache_hit_tokens", 0) or 0
+            miss = getattr(response.usage, "prompt_cache_miss_tokens", 0) or 0
+            cached = 0
+            details = getattr(response.usage, "prompt_tokens_details", None)
+            if details is not None:
+                cached = getattr(details, "cached_tokens", None) or 0
+            if cached:
+                if hit == 0:
+                    hit = min(int(cached), int(prompt))
+                if miss == 0:
+                    miss = max(int(prompt) - hit, 0)
             usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens or 0,
+                prompt_tokens=prompt,
                 completion_tokens=response.usage.completion_tokens or 0,
                 total_tokens=response.usage.total_tokens or 0,
-                prompt_cache_hit_tokens=getattr(response.usage, "prompt_cache_hit_tokens", 0) or 0,
-                prompt_cache_miss_tokens=getattr(response.usage, "prompt_cache_miss_tokens", 0) or 0,
+                prompt_cache_hit_tokens=hit,
+                prompt_cache_miss_tokens=miss,
             )
 
         return LLMResponse(
